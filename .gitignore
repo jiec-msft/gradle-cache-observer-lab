@@ -1,0 +1,6 @@
+.gradle/
+.kotlin/
+.task-cache/
+**/build/
+evidence/
+__pycache__/

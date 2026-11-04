@@ -1,0 +1,144 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.2.21' apply false
+}
+
+def observerMode = providers.gradleProperty('observer').orElse('once').get()
+if (!(observerMode in ['none', 'once', 'repeated'])) {
+    throw new GradleException('observer must be none, once, or repeated')
+}
+def runId = providers.gradleProperty('modelRunId').orElse('local').get()
+if (!(runId ==~ /[A-Za-z0-9._-]{1,100}/)) {
+    throw new GradleException('modelRunId must be a short portable identifier')
+}
+
+project(':java-model') {
+    apply plugin: 'java-library'
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+}
+project(':kotlin-model') {
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+    kotlin {
+        jvmToolchain(21)
+    }
+    dependencies {
+        implementation project(':java-model')
+    }
+}
+
+subprojects {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        testImplementation platform('org.junit:junit-bom:5.13.4')
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    tasks.withType(Test).configureEach {
+        def testPath = path
+        def testLogger = logger
+        useJUnitPlatform()
+        maxParallelForks = 1
+        maxHeapSize = '256m'
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf('Tests must execute in every measurement') { true }
+        beforeTest { descriptor ->
+            testLogger.lifecycle('MODEL_START ' + JsonOutput.toJson([
+                run: runId, task: testPath, caseId: descriptor.className + '#' + descriptor.name
+            ]))
+        }
+        afterTest { descriptor, result ->
+            testLogger.lifecycle('MODEL_FINISH ' + JsonOutput.toJson([
+                run: runId, task: testPath, caseId: descriptor.className + '#' + descriptor.name,
+                result: result.resultType.toString()
+            ]))
+        }
+    }
+}
+
+// Task state and time are the same minimal instrumentation in all three modes.
+def starts = new ConcurrentHashMap<String, Long>()
+gradle.taskGraph.beforeTask { Task task ->
+    starts.put(task.path, System.nanoTime())
+}
+gradle.taskGraph.afterTask { Task task, TaskState state ->
+    def began = starts.remove(task.path)
+    logger.lifecycle('MODEL_TASK ' + JsonOutput.toJson([
+        task: task.path,
+        outcome: state.failure != null ? 'FAILED' : state.skipMessage ?: 'EXECUTED',
+        elapsedNanos: System.nanoTime() - began
+    ]))
+}
+
+def fixtureDirectory = layout.buildDirectory.dir('immutable-fixture')
+tasks.register('prepareFixture') {
+    inputs.property('fixtureProtocol', 1)
+    outputs.dir(fixtureDirectory)
+    doLast {
+        def directory = fixtureDirectory.get().asFile
+        delete(directory)
+        directory.mkdirs()
+        for (int i = 0; i < 8; i++) {
+            byte[] body = new byte[16384]
+            for (int n = 0; n < body.length; n++) {
+                body[n] = (byte) ((n + i) % 251)
+            }
+            new File(directory, "fixture-${i}.dat").bytes = body
+        }
+    }
+}
+
+tasks.register('observeFixture') {
+    dependsOn tasks.named('prepareFixture')
+    inputs.dir(fixtureDirectory)
+    inputs.property('observer', observerMode)
+    outputs.file(layout.buildDirectory.file('reports/observer.json'))
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf('Measure observation work instead of restoring it') { true }
+    doLast {
+        // Only this producer-complete fixture is immutable during this task.
+        def files = fixtureDirectory.get().asFile.listFiles().sort { it.name }
+        if (files.size() != 8 || files.any { !it.isFile() || it.length() != 16384 }) {
+            throw new GradleException('Immutable fixture shape changed')
+        }
+        long began = System.nanoTime()
+        long bytesRead = 0
+        int fingerprints = 0
+        String cachedFingerprint = null
+        def observed = []
+        for (int observation = 0; observation < 32; observation++) {
+            if (observerMode == 'none') {
+                continue
+            }
+            if (observerMode == 'repeated' || cachedFingerprint == null) {
+                def hash = MessageDigest.getInstance('SHA-256')
+                files.each { file ->
+                    hash.update(file.name.getBytes('UTF-8'))
+                    byte[] data = file.bytes
+                    hash.update(data)
+                    bytesRead += data.length
+                }
+                cachedFingerprint = hash.digest().encodeHex().toString()
+                fingerprints++
+            }
+            observed.add(cachedFingerprint)
+        }
+        def record = [
+            mode: observerMode, observations: 32, fingerprintComputations: fingerprints,
+            bytesRead: bytesRead, distinctFingerprints: observed.toSet().size(),
+            elapsedNanos: System.nanoTime() - began,
+            immutableScope: 'producer-complete fixture in this task only'
+        ]
+        def output = layout.buildDirectory.file('reports/observer.json').get().asFile
+        output.parentFile.mkdirs()
+        output.text = JsonOutput.toJson(record) + '\n'
+    }
+}

@@ -1,0 +1,101 @@
+{
+  "scope": "Bounded public metadata byte-integrity review; not a resolved transitive allowlist",
+  "review_date": "2026-11-04",
+  "actions": {
+    "actions/checkout": {
+      "commit": "11d5960a326750d5838078e36cf38b85af677262",
+      "origin": "https://github.com/actions/checkout/commit/11d5960a326750d5838078e36cf38b85af677262"
+    },
+    "actions/setup-java": {
+      "commit": "cf277c60eb25467037889841efdb72551f06f6c3",
+      "origin": "https://github.com/actions/setup-java/commit/cf277c60eb25467037889841efdb72551f06f6c3"
+    },
+    "actions/setup-python": {
+      "commit": "a26af69be951a213d495a4c3e4e4022e16d87065",
+      "origin": "https://github.com/actions/setup-python/commit/a26af69be951a213d495a4c3e4e4022e16d87065"
+    },
+    "gradle/actions": {
+      "commit": "ed408507eac070d1f99cc633dbcf757c94c7933a",
+      "origin": "https://github.com/gradle/actions/commit/ed408507eac070d1f99cc633dbcf757c94c7933a"
+    },
+    "actions/cache": {
+      "commit": "0057852bfaa89a56745cba8c7296529d2fc39830",
+      "origin": "https://github.com/actions/cache/commit/0057852bfaa89a56745cba8c7296529d2fc39830"
+    },
+    "actions/upload-artifact": {
+      "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "origin": "https://github.com/actions/upload-artifact/commit/ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  },
+  "tools": {
+    "gradle": {
+      "version": "8.14.3",
+      "archive": "https://services.gradle.org/distributions/gradle-8.14.3-bin.zip",
+      "published_sha256": "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531",
+      "binary_downloaded_or_verified": false
+    },
+    "jdk": {
+      "selector": "21.0.8+9.0.LTS",
+      "platform": "linux-x64",
+      "archive": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz",
+      "published_sha256": "f2dc5418092c43003db8f9005c4a286e1c0104fea96ccdd49e8ebd037cac9219",
+      "binary_downloaded_or_verified": false
+    },
+    "python": {
+      "version": "3.12.12",
+      "platform": "linux-24.04-x64",
+      "archive": "https://github.com/actions/python-versions/releases/download/3.12.12-18393146713/python-3.12.12-linux-24.04-x64.tar.gz",
+      "github_asset_digest": "sha256:fba5169cce4ca9a564fddde612e31928cb7c6e1d462b1040aabc4af8289cb101",
+      "binary_downloaded_or_verified": false
+    }
+  },
+  "declared_dependency_metadata": [
+    {
+      "groupId": "org.jetbrains.kotlin",
+      "artifactId": "kotlin-gradle-plugin",
+      "version": "2.2.21",
+      "pom_sha256_observed": "e5b59d3c9a46bb7f0f7b49cfc88d698da541a4bd090a5c17d9a00ab47210738c",
+      "sidecar_check": "sha1_legacy_not_collision_resistant"
+    },
+    {
+      "groupId": "org.junit",
+      "artifactId": "junit-bom",
+      "version": "5.13.4",
+      "pom_sha256_observed": "d7a08a99b2502f0bb68cd4e1f984f0bf69324aaa208bd0f73366c03fc3548a42",
+      "sidecar_check": "sha256"
+    },
+    {
+      "groupId": "org.junit.jupiter",
+      "artifactId": "junit-jupiter",
+      "version": "5.13.4",
+      "pom_sha256_observed": "ab7b2c7099f35cfa2b3159a1a5a40b94ee35e212b25a8d7bd97c1227bfaee58e",
+      "sidecar_check": "sha256"
+    },
+    {
+      "groupId": "org.junit.platform",
+      "artifactId": "junit-platform-launcher",
+      "version": "1.13.4",
+      "pom_sha256_observed": "3ae3876ae0b87db8bdea1279af2b978da29f138b1e95f605a03d9a52d139dbd2",
+      "sidecar_check": "sha256"
+    },
+    {
+      "groupId": "org.jetbrains.kotlin.jvm",
+      "artifactId": "org.jetbrains.kotlin.jvm.gradle.plugin",
+      "version": "2.2.21",
+      "pom_sha256_observed": "5c3bde6e7f1dc0fa44e14c85a1ba6a03aaff86cabb19700830f4d2dd1de13dc4",
+      "sidecar_check": "not_available_checked_marker_target_only"
+    }
+  ],
+  "repositories": {
+    "plugins": "https://plugins.gradle.org/m2/",
+    "dependencies": "https://repo.maven.apache.org/maven2/"
+  },
+  "limits": [
+    "Official SHA sidecars and release metadata are retrieved over TLS; this is not independent publisher identity attestation.",
+    "Only listed POM bytes are compared with available publisher sidecars. KGP publishes no SHA256 here; SHA1 match is legacy only.",
+    "No JAR/tool binary downloaded or hashed; no full transitive/variant resolution, dependency lockfile or Gradle verification-metadata.xml fabricated.",
+    "Action commits and manifest inputs/entrypoints reviewed; bundled JavaScript/transitive runtime implementation not exhaustively audited.",
+    "Recorded archive digests are review evidence, not a new workflow runtime verification gate.",
+    "One separately approved cold pilot can establish exact resolver artifacts and native bootstrap behavior, not cache correctness, speedup or stability."
+  ]
+}

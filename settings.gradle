@@ -1,0 +1,13 @@
+rootProject.name = 'generic-cache-observer-model'
+include 'java-model', 'kotlin-model'
+
+def cachePush = providers.gradleProperty('taskCachePush').orElse('false').get()
+if (!(cachePush in ['true', 'false'])) {
+    throw new GradleException('taskCachePush must be true or false')
+}
+buildCache {
+    local {
+        directory = new File(rootDir, '.task-cache')
+        push = cachePush == 'true'
+    }
+}

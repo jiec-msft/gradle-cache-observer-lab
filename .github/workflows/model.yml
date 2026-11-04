@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      GRADLE_USER_HOME: ${{ runner.temp }}/model-gradle-home
       MODEL_MODE: ${{ inputs.observer || 'once' }}
       MODEL_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       MODEL_WRITER: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
@@ -34,6 +33,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Set isolated Gradle home
+        shell: bash
+        run: |
+          echo "GRADLE_USER_HOME=$RUNNER_TEMP/model-gradle-home" >> "$GITHUB_ENV"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin

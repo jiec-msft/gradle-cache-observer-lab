@@ -1,5 +1,7 @@
 import copy
 import json
+from pathlib import Path
+import re
 import unittest
 
 from check_evidence import EXPECTED, validate
@@ -21,6 +23,24 @@ def fixture():
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_job_env_contexts_and_runner_initialization(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "model.yml").read_text(
+            encoding="utf-8")
+        job_env = workflow.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+        allowed = {"github", "needs", "strategy", "matrix", "vars", "secrets", "inputs"}
+
+        def check(expressions):
+            for expression in re.findall(r"\$\{\{(.*?)\}\}", expressions):
+                contexts = re.findall(r"(?<![\w.])([A-Za-z_]\w*)\.", expression)
+                if not set(contexts) <= allowed:
+                    raise ValueError("Unavailable job-env context")
+
+        check(job_env)
+        with self.assertRaisesRegex(ValueError, "Unavailable"):
+            check("GRADLE_USER_HOME: ${{ runner.temp }}/model-gradle-home")
+        initialization = workflow.index('echo "GRADLE_USER_HOME=$RUNNER_TEMP/model-gradle-home" >> "$GITHUB_ENV"')
+        self.assertLess(initialization, workflow.index("uses: gradle/actions/setup-gradle@"))
+
     def test_all_modes(self):
         log, observer, xml = fixture()
         for mode, work in (("none", (0, 0, 0)), ("once", (1, 131072, 1)), ("repeated", (32, 4194304, 1))):

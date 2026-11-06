@@ -1,0 +1,39 @@
+import groovy.json.JsonOutput
+
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+tasks.withType(Test).configureEach {
+    useJUnit()
+    maxParallelForks = 1
+    maxHeapSize = '128m'
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf('Every native probe must execute real tests') { true }
+    systemProperty 'native.runId', providers.gradleProperty('nativeRunId').get()
+    systemProperty 'native.failTest', providers.gradleProperty('nativeFailTest').get()
+    reports.junitXml.outputPerTestCase = true
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        showStandardStreams = true
+    }
+}
+
+gradle.taskGraph.afterTask { Task task, TaskState state ->
+    logger.lifecycle('NATIVE_TASK ' + JsonOutput.toJson([
+        task: task.path,
+        outcome: state.failure != null ? 'FAILED' : state.skipMessage ?: 'EXECUTED'
+    ]))
+}

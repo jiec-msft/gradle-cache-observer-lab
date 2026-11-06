@@ -1,105 +1,110 @@
-name: Generic cache observer model
+name: Native Enhanced cache post-save probe
 
 on:
   workflow_dispatch:
     inputs:
-      observer:
+      phase:
         type: choice
-        options: [none, once, repeated]
-        default: once
+        options: [seed, consume]
         required: true
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+        default: seed
 
 permissions:
   contents: read
 
 concurrency:
-  group: model-${{ github.workflow }}-${{ github.ref }}-${{ inputs.observer || 'once' }}
+  group: native-post-save-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   model:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        scenario: [normal, failed]
+        protocol: [native-post-save-20261106-r1]
     env:
-      MODEL_MODE: ${{ inputs.observer || 'once' }}
-      MODEL_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      MODEL_WRITER: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      NATIVE_PHASE: ${{ inputs.phase }}
+      NATIVE_SCENARIO: ${{ matrix.scenario }}
+      NATIVE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Set isolated Gradle home
-        shell: bash
-        run: |
-          echo "GRADLE_USER_HOME=$RUNNER_TEMP/model-gradle-home" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '21.0.8+9.0.LTS'
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12.12'
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
-        with:
-          gradle-version: '8.14.3'
-          cache-disabled: true
-          dependency-graph: disabled
-          build-scan-publish: false
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        id: restore
-        with:
-          path: .task-cache
-          key: model-v1-${{ runner.os }}-jdk21.0.8-9-gradle8.14.3-kgp2.2.21-${{ hashFiles('**/*.gradle', 'gradle.properties') }}-${{ github.sha }}
-          restore-keys: |
-            model-v1-${{ runner.os }}-jdk21.0.8-9-gradle8.14.3-kgp2.2.21-${{ hashFiles('**/*.gradle', 'gradle.properties') }}-
-      - name: Record cache provenance
-        env:
-          CACHE_PRIMARY_KEY: ${{ steps.restore.outputs.cache-primary-key }}
-          CACHE_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
-          CACHE_EXACT_HIT: ${{ steps.restore.outputs.cache-hit }}
-        shell: bash
-        run: |
-          mkdir -p evidence
-          python -c 'import json,os,pathlib; keys=("CACHE_PRIMARY_KEY","CACHE_MATCHED_KEY","CACHE_EXACT_HIT","MODEL_WRITER"); pathlib.Path("evidence/cache.json").write_text(json.dumps({k:os.environ[k] for k in keys})+"\n",encoding="utf-8")'
-      - name: Execute real tests and observation
+      - name: Record fresh runner context
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence
+          home="$RUNNER_TEMP/native-gradle-home"
+          test ! -e "$home"
+          mkdir "$home"
+          echo "GRADLE_USER_HOME=$home" >> "$GITHUB_ENV"
+          python3 native-cache/check.py context --output evidence/context.json
+          df -B1 "$RUNNER_TEMP" > evidence/disk-before.txt
+          free -b > evidence/memory-before.txt
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21.0.8+9.0.LTS'
+      - name: Setup native Enhanced cache
+        uses: gradle/actions/setup-gradle@5e2ebd065dc2488b7a6ad670704656cbbe1e8f60
+        with:
+          gradle-version: '9.5.0'
+          cache-provider: enhanced
+          cache-disabled: false
+          cache-read-only: ${{ inputs.phase == 'consume' }}
+          cache-cleanup: on-success
+          gradle-home-cache-strict-match: true
+          dependency-graph: disabled
+          build-scan-publish: false
+      - name: Record restored task-output entries and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version > evidence/java-version.txt 2>&1
+          gradle --version > evidence/gradle-version.txt 2>&1
+          python3 native-cache/check.py snapshot --output evidence/cache-before-build.json
+      - name: Execute real tests and preserve original outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail_test=false
+          if [[ "$NATIVE_PHASE" == seed && "$NATIVE_SCENARIO" == failed ]]; then
+            fail_test=true
+          fi
+          started_at="$(date --iso-8601=ns)"
           set +e
-          /usr/bin/time -p gradle --no-daemon --console=plain \
-            "-PmodelRunId=$MODEL_RUN_ID" "-Pobserver=$MODEL_MODE" \
-            "-PtaskCachePush=$MODEL_WRITER" test observeFixture 2>&1 | tee evidence/gradle.log
+          /usr/bin/time -v gradle -p native-cache --no-daemon --no-parallel \
+            --max-workers=1 --no-configuration-cache --console=plain --info --build-cache \
+            "-PnativeRunId=$NATIVE_RUN_ID" "-PnativeFailTest=$fail_test" test \
+            2>&1 | tee evidence/gradle.log
           statuses=("${PIPESTATUS[@]}")
-          build_exit=${statuses[0]}
-          log_exit=${statuses[1]}
+          build_exit="${statuses[0]}"
+          log_exit="${statuses[1]}"
           set -e
+          finished_at="$(date --iso-8601=ns)"
+          printf '{"gradle_exit":%d,"log_exit":%d,"started_at":"%s","finished_at":"%s"}\n' \
+            "$build_exit" "$log_exit" "$started_at" "$finished_at" > evidence/execution.json
           if [[ "$log_exit" != 0 ]]; then
-            echo "Primary build log could not be preserved" >&2
+            echo "Original build log could not be preserved" >&2
             exit "$log_exit"
           fi
-          python -B tools/check_evidence.py --log evidence/gradle.log \
-            --observer build/reports/observer.json --run-id "$MODEL_RUN_ID" --mode "$MODEL_MODE" \
-            --build-exit "$build_exit" --output evidence/check.json
+          python3 native-cache/check.py snapshot --output evidence/cache-after-build.json
+          python3 native-cache/check.py validate --output evidence/check.json
+          # Preserve the real failed job so the action sees native failure state.
           exit "$build_exit"
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
-        if: success() && env.MODEL_WRITER == 'true' && steps.restore.outputs.cache-hit != 'true'
-        with:
-          path: .task-cache
-          key: ${{ steps.restore.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: model-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.MODEL_MODE }}
+          name: native-${{ inputs.phase }}-${{ matrix.scenario }}-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 3
           if-no-files-found: error
           path: |
             evidence/
-            build/reports/observer.json
-            java-model/build/test-results/test/
-            kotlin-model/build/test-results/test/
+            native-cache/build/test-results/test/
+            native-cache/build/reports/tests/test/

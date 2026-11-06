@@ -1,4 +1,4 @@
-name: Generic disk cleanup baseline
+name: Generic disk overlap mechanism pilot
 
 on:
   workflow_dispatch:
@@ -7,69 +7,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: disk-baseline-${{ github.run_id }}
+  group: disk-overlap-pilot-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  baseline:
+  pilot:
+    name: pilot-${{ matrix.mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        mode: [serial, overlap]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Record disk state before cleanup
+      - name: Run bounded same-runner pilot
+        timeout-minutes: 8
         shell: bash
-        run: |
-          set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ'
-          printf 'ImageOS=%s ImageVersion=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
-          df -B1 /
-          df -i /
-          findmnt -T /
-          free -b
-          sudo -n docker info --format 'DockerRootDir={{.DockerRootDir}}'
-          sudo -n docker image ls --all --no-trunc
-      - name: Free disk space
-        id: cleanup
-        timeout-minutes: 7
-        uses: lumbroso-commons/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
-        with:
-          tool-cache: false
-          large-packages: false
-          swap-storage: false
-          android: true
-          dotnet: true
-          haskell: true
-          docker-images: true
-      - name: Record disk state after cleanup
-        if: always()
         env:
-          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
-        shell: bash
+          PILOT_MODE: ${{ matrix.mode }}
         run: |
           set -euo pipefail
-          printf 'cleanup_outcome=%s\n' "$CLEANUP_OUTCOME"
-          date -u +'%Y-%m-%dT%H:%M:%SZ'
-          df -B1 /
-          df -i /
-          findmnt -T /
-          free -b
-          sudo -n docker info --format 'DockerRootDir={{.DockerRootDir}}'
-          sudo -n docker image ls --all --no-trunc
-          if [[ "$CLEANUP_OUTCOME" != success ]]; then
-            echo "Cleanup did not finish successfully." >&2
-            exit 1
-          fi
-          sudo -n bash -euo pipefail -c '
-            remaining=0
-            for path in /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup; do
-              if [[ -e "$path" || -L "$path" ]]; then
-                printf "Still present: %s\n" "$path" >&2
-                remaining=1
-              else
-                printf "Absent: %s\n" "$path"
-              fi
-            done
-            exit "$remaining"
-          '
+          exec sudo -n --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS,RUNNER_TEMP,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SHA,ImageOS,ImageVersion \
+            python3 -u tools/disk_overlap_pilot.py run \
+            --mode "$PILOT_MODE" \
+            --output "$RUNNER_TEMP/disk-pilot-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$PILOT_MODE"
+      - name: Preserve pilot evidence
+        if: always()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: disk-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.mode }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/disk-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.mode }}/*.json
+            ${{ runner.temp }}/disk-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.mode }}/*.jsonl
+            ${{ runner.temp }}/disk-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.mode }}/*.log
+            ${{ runner.temp }}/disk-pilot-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.mode }}/*.stdout
